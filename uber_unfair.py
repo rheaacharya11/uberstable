@@ -1,7 +1,9 @@
 import random
 import math
 
-
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial.distance import cdist
 
 ## Notes
 # cost distance between driver current location, and passenger pickup location + some function of the euclidean distance between the passenger dropoff location and city center
@@ -103,6 +105,40 @@ def generate_coordinate_point():
     y = max(min(y, 50), -50)
 
     return x, y
+
+def random_matches(drivers, passengers, city_center):
+    random.shuffle(drivers)
+    random.shuffle(passengers)
+
+    matches = []
+
+    for i, passenger in enumerate(passengers):
+        driver = drivers[i % len(drivers)]
+        if driver not in matches:
+            matches.append(driver, passenger)
+
+    return matches
+
+def closets_matches(drivers, passengers):
+    # Calculate the Euclidean distance matrix between points in drivers and passengers
+    driver_locations = [driver.current_location for driver in drivers]
+    passenger_locations = [passenger.current_location for passenger in passengers]
+
+    distance_matrix = cdist(driver_locations, passenger_locations)
+
+    # Solve the assignment problem using the Hungarian algorithm
+    row_ind, col_ind = linear_sum_assignment(distance_matrix)
+
+    # Create a dictionary to store the matches
+    matches = []
+
+    # Populate the matches dictionary
+    matches = [(drivers[a].tolist(), passengers[b].tolist()) for a, b in zip(row_ind, col_ind)]
+
+    return matches
+
+    
+
 
 # Function for driver-proposing deferred acceptance matching
 def driver_proposing_matching(drivers, passengers, city_center):
