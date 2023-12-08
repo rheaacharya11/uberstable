@@ -93,6 +93,9 @@ class Passenger(Agent):
         normal_driver_dict = {driver: (normalized_function1[i][0] + var*normalized_function2[i][0]) for i, driver in enumerate(driver_dict.keys())}
         self.preference_ordering = sorted(normal_driver_dict.keys(), key=lambda key: normal_driver_dict[key])
 
+def manh_dist(driver, passenger):
+            return (abs(driver.current_location[0] - passenger.current_location[0]) 
+            + abs(driver.current_location[1] - passenger.current_location[1]))
 
 # Function to generate a list of drivers
 def generate_drivers(num_drivers):
@@ -128,7 +131,9 @@ def generate_coordinate_point():
 
     return x, y
 
-def random_matches(drivers, passengers, city_center):
+def random_matches(drivers, passengers):
+    driver_dict = {driver.name: driver for driver in drivers}
+    passenger_dict = {passenger.name: passenger for passenger in passengers}
     random.shuffle(drivers)
     random.shuffle(passengers)
 
@@ -137,7 +142,13 @@ def random_matches(drivers, passengers, city_center):
     for i, passenger in enumerate(passengers):
         driver = drivers[i % len(drivers)]
         if driver not in matches:
-            matches.append(driver, passenger)
+            print(driver.name)
+            matches.append((driver.name, passenger.name))
+    
+    for match in matches:
+        driver_name, passenger_name = match
+        if passenger_dict[passenger_name].WTP < manh_dist(driver_dict[driver_name], passenger_dict[passenger_name]):
+            matches.remove(match)
 
     return matches
 
@@ -145,6 +156,8 @@ def closest_matches(drivers, passengers):
     # Calculate the Euclidean distance matrix between points in drivers and passengers
     driver_locations = [driver.current_location for driver in drivers]
     passenger_locations = [passenger.current_location for passenger in passengers]
+    driver_dict = {driver.current_location: driver for driver in drivers}
+    passenger_dict = {passenger.current_location: passenger for passenger in passengers}
 
     distance_matrix = cdist(driver_locations, passenger_locations)
 
@@ -154,15 +167,20 @@ def closest_matches(drivers, passengers):
     # Create a dictionary to store the matches
     matches = []
 
-    # Populate the matches dictionary
-    matches = [(drivers[a].tolist(), passengers[b].tolist()) for a, b in zip(row_ind, col_ind)]
+    for i, j in zip(row_ind, col_ind):
+        driver_point = driver_locations[i]
+        passenger_point = passenger_locations[j]
+        driver = driver_dict[driver_point] 
+        passenger = passenger_dict[passenger_point]
+        matches.append((driver, passenger))
+
+    for match in matches:
+        if passenger.WTP < manh_dist(driver, passenger):
+            matches.remove(match)
 
     return matches
 
-    
-def manh_dist(driver, passenger):
-            return (abs(driver.current_location[0] - passenger.current_location[0]) 
-            + abs(driver.current_location[1] - passenger.current_location[1]))
+
 
 # Function for driver-proposing deferred acceptance matching
 def driver_proposing_matching(drivers, passengers, city_center, var):
@@ -243,33 +261,50 @@ def driver_proposing_matching(drivers, passengers, city_center, var):
     return matches
 
 # Function to simulate a round of the described simulation
-def simulate_round(drivers, passengers, round_num, city_center):
+def simulate_round(drivers, passengers, round_num, city_center, algo, var):
     print(f"\nRound {round_num}:")
 
+    driver_dict = {driver.name: driver for driver in drivers}
+    passenger_dict = {passenger.name: passenger for passenger in passengers}
+
     new_passengers = generate_passengers(NUM_AGENTS)
-    new_matches = driver_proposing_matching(drivers, new_passengers, city_center, 0)
 
-    # Print the round number and new matches
-    print(f"Matches: {new_matches}")
+    print(drivers[1].name)
+    print(new_passengers[1].name)
 
-    for driver in drivers:
+
+    if (algo == driver_proposing_matching and var == 0):
+        new_matches = driver_proposing_matching(drivers, new_passengers, city_center, 0)
+    elif (algo == driver_proposing_matching and var == 1):
+        new_matches = driver_proposing_matching(drivers, new_passengers, city_center, 1)
+    elif (algo == random_matches and var == 1):
+        new_matches = random_matches(drivers, new_passengers)
+    else:
+        new_matches = closest_matches(drivers, new_passengers)
+
+    for match in new_matches:
+        for driver in drivers:
+            if driver.name == match[0]:
+                driver.matched_passenger_name = match[1]
         if driver.matched_passenger_name is not None:
-            # Find the matched passenger in the new_passengers list
-            matched_passenger = next((p for p in new_passengers if p.name == driver.matched_passenger_name), None)
+            passenger = passenger_dict[driver.matched_passenger_name]
+            driver.current_location = passenger.dropoff_location
+            driver.total_income += passenger.WTP
 
-            # Check if matched_passenger is not None before accessing attributes
-            if matched_passenger is not None:
-                driver.current_location = matched_passenger.dropoff_location
-                driver.total_income += matched_passenger.WTP
+        # if driver.matched_passenger_name is not None:
+        #     # Find the matched passenger in the new_passengers list
+        #     matched_passenger = next((p for p in new_passengers if p.name == driver.matched_passenger_name), None)
 
-    return new_passengers, new_matches
+        #     # Check if matched_passenger is not None before accessing attributes
+        #     if matched_passenger is not None:
+        #         driver.current_location = matched_passenger.dropoff_location
+        #         driver.total_income += matched_passenger.WTP
+    return new_matches
 
 # Main function to initialize and run the simulation
 def main():
     round_num = 1
     city_center = (0, 0)
-
-    
 
     # Generate drivers only in round 1
     drivers = generate_drivers(NUM_AGENTS)
@@ -277,21 +312,28 @@ def main():
     # Generate passengers for round 1
     passengers = generate_passengers(NUM_AGENTS)
 
-    matches = driver_proposing_matching(drivers, passengers, city_center, 0)
+    matches = random_matches(drivers, passengers)
+    print(matches)
+
+    driver_dict = {driver.name: driver for driver in drivers}
+    passenger_dict = {passenger.name: passenger for passenger in passengers}
 
     for match in matches:
-        driver = next(d for d in drivers if d.name == match[0])
-        passenger = next(p for p in passengers if p.name == match[1])
-        # Update driver's attributes based on the matched passenger
-        driver.total_income += passenger.WTP
-        driver.matched_passenger_name = passenger.name
+        for driver in drivers:
+            if driver.name == match[0]:
+                driver.matched_passenger_name = match[1]
+            if driver.matched_passenger_name is not None:
+                passenger = passenger_dict[driver.matched_passenger_name]
+                driver.current_location = passenger.dropoff_location
+                driver.total_income += passenger.WTP
 
-    for round_num in range(2, 50):
+    for round_num in range(2, 3):
         # Generate new passengers for each round
         # passengers = generate_passengers(random.randint(15,15))
         
         # Simulate the round
-        new_passengers, matches = simulate_round(drivers, passengers, round_num, city_center)
+        matches = simulate_round(drivers, passengers, round_num, city_center, driver_proposing_matching, 0)
+        print(matches)
 
     # Print total_income values for each driver at the end of the simulation
     print("\nTotal Income of Each Driver:")
