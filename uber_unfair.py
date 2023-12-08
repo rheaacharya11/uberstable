@@ -4,7 +4,9 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 from sklearn.preprocessing import MinMaxScaler
+import copy
 import statistics
+import matplotlib.pyplot as plt
 
 ## Notes
 # cost distance between driver current location, and passenger pickup location + some function of the euclidean distance between the passenger dropoff location and city center
@@ -16,7 +18,7 @@ import statistics
 # 2-3 papers
 # the paper online bi-partite matching, each time a driver or rider comes in, each consumer has willingness to pay
 
-NUM_AGENTS = 15
+# NUM_AGENTS = 15
 
 # Base class for Agents
 class Agent:
@@ -48,10 +50,18 @@ class Driver(Agent):
 
 
     # Calculate preference ordering for passengers
-    def calculate_preference_ordering_driver(self, passengers, city_center):
+    def calculate_preference_ordering_driver_new(self, passengers, city_center):
+        p = 0.9
         self.preference_ordering = sorted(passengers, key=lambda passenger: -(passenger.WTP - 
-        (abs(passenger.current_location[0] - self.current_location[0]) + abs(passenger.current_location[1] 
-        - self.current_location[1]) + 0.1 * (math.sqrt((passenger.dropoff_location[0] - city_center[0])**2 + 
+        2*((1-p)*(abs(passenger.current_location[0] - self.current_location[0]) + abs(passenger.current_location[1] 
+        - self.current_location[1])) + p*0.1 * (math.sqrt((passenger.dropoff_location[0] - city_center[0])**2 + 
+        (passenger.dropoff_location[1] - city_center[1])**2))**2)))
+    
+    def calculate_preference_ordering_driver(self, passengers, city_center):
+        p = 0.1
+        self.preference_ordering = sorted(passengers, key=lambda passenger: -(passenger.WTP - 
+        2*((1-p)*(abs(passenger.current_location[0] - self.current_location[0]) + abs(passenger.current_location[1] 
+        - self.current_location[1])) + p*0.1 * (math.sqrt((passenger.dropoff_location[0] - city_center[0])**2 + 
         (passenger.dropoff_location[1] - city_center[1])**2))**2)))
 
 
@@ -67,10 +77,13 @@ class Passenger(Agent):
     
     # Method to calculate Willingness To Pay for passengers
     def calculate_WTP(self):
+        mean = 1
+        sd = 0.1
+        wtp = random.gauss(mean, sd)
         euclidean_distance1 = math.sqrt((self.dropoff_location[0] - 0)**2 + (self.dropoff_location[1] - 0)**2)
         euclidean_distance2 = math.sqrt((self.current_location[0] - 0)**2 + (self.current_location[1] - 0)**2)
         manhattan_distance = abs(self.current_location[0] - self.dropoff_location[0]) + abs(self.current_location[1] - self.dropoff_location[1])
-        return ((euclidean_distance1+ euclidean_distance2)/2 + manhattan_distance)/3
+        return wtp*((euclidean_distance1+ euclidean_distance2)/2 + manhattan_distance)/3
 
     # Calculate preference ordering for drivers
     def calculate_preference_ordering_passenger(self, drivers, var):
@@ -142,7 +155,6 @@ def random_matches(drivers, passengers):
     for i, passenger in enumerate(passengers):
         driver = drivers[i % len(drivers)]
         if driver not in matches:
-            print(driver.name)
             matches.append((driver.name, passenger.name))
     
     for match in matches:
@@ -153,9 +165,14 @@ def random_matches(drivers, passengers):
     return matches
 
 def closest_matches(drivers, passengers):
+    driver_dict_name = {driver.name: driver for driver in drivers}
+    passenger_dict_name = {passenger.name: passenger for passenger in passengers}
+    
     # Calculate the Euclidean distance matrix between points in drivers and passengers
     driver_locations = [driver.current_location for driver in drivers]
     passenger_locations = [passenger.current_location for passenger in passengers]
+
+
     driver_dict = {driver.current_location: driver for driver in drivers}
     passenger_dict = {passenger.current_location: passenger for passenger in passengers}
 
@@ -172,13 +189,16 @@ def closest_matches(drivers, passengers):
         passenger_point = passenger_locations[j]
         driver = driver_dict[driver_point] 
         passenger = passenger_dict[passenger_point]
-        matches.append((driver, passenger))
+        matches.append((driver.name, passenger.name))
 
     for match in matches:
-        if passenger.WTP < manh_dist(driver, passenger):
+        driver_name, passenger_name = match
+        if passenger_dict_name[passenger_name].WTP < manh_dist(driver_dict_name[driver_name], passenger_dict_name[passenger_name]):
             matches.remove(match)
 
     return matches
+        
+
 
 
 
@@ -202,21 +222,17 @@ def driver_proposing_matching(drivers, passengers, city_center, var):
 
     passenger_prefs = {passenger.name: {driver.name: i for (i, driver) in enumerate(passenger.preference_ordering)} for passenger in passengers}
     driver_prefs = {driver.name: {passenger.name: i for (i, passenger) in enumerate(driver.preference_ordering)} for driver in drivers}
-    print("Passenger preferences:", passenger_prefs)
-    print("Driver preferences:",driver_prefs)
 
     # initialize set of unmatched renters
     free_drivers = set(drivers)
 
     while free_drivers:
         driver = free_drivers.pop()
-        print(f"{driver.name} proposing")
 
         for preferred_passenger in driver.preference_ordering:
             if preferred_passenger.matched_driver_name is None:
                 preferred_passenger.matched_driver_name = driver.name
                 driver.matched_passenger_name = preferred_passenger.name
-                print(f"empty match: {driver.name} matched with {preferred_passenger.name}")
                 break 
             else:
                 current_match_rank = passenger_prefs[preferred_passenger.name][preferred_passenger.matched_driver_name]
@@ -228,7 +244,7 @@ def driver_proposing_matching(drivers, passengers, city_center, var):
                     preferred_passenger.matched_driver_name = driver.name
                     driver.matched_passenger_name = preferred_passenger.name
                     # print("matched non-empty")
-                    print(f"non-empty match: {driver.name} matched with {preferred_passenger.name}")
+                    #print(f"non-empty match: {driver.name} matched with {preferred_passenger.name}")
                     break
 
 
@@ -238,6 +254,82 @@ def driver_proposing_matching(drivers, passengers, city_center, var):
         driver_name, passenger_name = match
         if passenger_dict[passenger_name].WTP < manh_dist(driver_dict[driver_name], passenger_dict[passenger_name]):
             matches.remove(match)
+    
+    
+
+    # # Continue proposing until all drivers are matched or no more passengers are available
+    # while unmatched_drivers and unmatched_passengers:
+    #     for driver in unmatched_drivers:
+    #         # Calculate preference ordering for the current round
+    #         driver.calculate_preference_ordering(unmatched_passengers, city_center)
+
+    #         # Try to propose to the most preferred passenger
+    #         if driver.preference_ordering:
+    #             best_passenger = driver.preference_ordering[0]
+
+    #             # Check if the best passenger is unmatched
+    #             if best_passenger in unmatched_passengers:
+    #                 matches.append((driver.name, best_passenger.name))
+    #                 unmatched_passengers.remove(best_passenger)
+    #                 unmatched_drivers.remove(driver)
+    #                 driver.total_income += best_passenger.WTP
+    #                 driver.matched_passenger_name = best_passenger.name
+    #                 break  # Break out of the loop to the next driver
+
+    return matches
+
+def driver_proposing_matching_new(drivers, passengers, city_center, var):
+    matches = []
+    unmatched_passengers = passengers.copy()
+    unmatched_drivers = drivers.copy()
+
+    # clear out last round
+    for i in range(len(drivers)):
+        drivers[i].matched_passenger_name = None 
+        drivers[i].calculate_preference_ordering_driver_new(passengers, city_center)
+        passengers[i].matched_passenger_name = None
+        passengers[i].calculate_preference_ordering_passenger(drivers, var)
+
+    # dicts from names to objects
+    driver_dict = {driver.name: driver for driver in drivers}
+    passenger_dict = {passenger.name: passenger for passenger in passengers}
+
+
+    passenger_prefs = {passenger.name: {driver.name: i for (i, driver) in enumerate(passenger.preference_ordering)} for passenger in passengers}
+    driver_prefs = {driver.name: {passenger.name: i for (i, passenger) in enumerate(driver.preference_ordering)} for driver in drivers}
+
+    # initialize set of unmatched renters
+    free_drivers = set(drivers)
+
+    while free_drivers:
+        driver = free_drivers.pop()
+
+        for preferred_passenger in driver.preference_ordering:
+            if preferred_passenger.matched_driver_name is None:
+                preferred_passenger.matched_driver_name = driver.name
+                driver.matched_passenger_name = preferred_passenger.name
+                break 
+            else:
+                current_match_rank = passenger_prefs[preferred_passenger.name][preferred_passenger.matched_driver_name]
+                new_match_rank = passenger_prefs[preferred_passenger.name][driver.name]
+                if new_match_rank < current_match_rank:
+                    # If the lender prefers the new renter, make the switch
+                    free_drivers.add(driver_dict[preferred_passenger.matched_driver_name])
+                    preferred_passenger.matched_driver_name = driver.name
+                    driver.matched_passenger_name = preferred_passenger.name
+                    # print("matched non-empty")
+                    #print(f"non-empty match: {driver.name} matched with {preferred_passenger.name}")
+                    break
+
+
+    matches = [(driver.name, driver.matched_passenger_name) for driver in drivers]
+    #filter the matches where wait time too long
+    for match in matches:
+        driver_name, passenger_name = match
+        if passenger_dict[passenger_name].WTP < manh_dist(driver_dict[driver_name], passenger_dict[passenger_name]):
+            matches.remove(match)
+    
+    
 
     # # Continue proposing until all drivers are matched or no more passengers are available
     # while unmatched_drivers and unmatched_passengers:
@@ -261,23 +353,18 @@ def driver_proposing_matching(drivers, passengers, city_center, var):
     return matches
 
 # Function to simulate a round of the described simulation
-def simulate_round(drivers, passengers, round_num, city_center, algo, var):
-    print(f"\nRound {round_num}:")
+def simulate_round(drivers, new_passengers, round_num, city_center, algo, var):
+    # print(f"\nRound {round_num}:")
 
     driver_dict = {driver.name: driver for driver in drivers}
-    passenger_dict = {passenger.name: passenger for passenger in passengers}
 
-    new_passengers = generate_passengers(NUM_AGENTS)
+    passenger_dict = {passenger.name: passenger for passenger in new_passengers}
 
-    print(drivers[1].name)
-    print(new_passengers[1].name)
-
-
-    if (algo == driver_proposing_matching and var == 0):
+    if algo == driver_proposing_matching:
         new_matches = driver_proposing_matching(drivers, new_passengers, city_center, 0)
-    elif (algo == driver_proposing_matching and var == 1):
-        new_matches = driver_proposing_matching(drivers, new_passengers, city_center, 1)
-    elif (algo == random_matches and var == 1):
+    if algo == driver_proposing_matching_new:
+        new_matches = driver_proposing_matching_new(drivers, new_passengers, city_center, 5)
+    elif algo == random_matches:
         new_matches = random_matches(drivers, new_passengers)
     else:
         new_matches = closest_matches(drivers, new_passengers)
@@ -299,27 +386,38 @@ def simulate_round(drivers, passengers, round_num, city_center, algo, var):
         #     if matched_passenger is not None:
         #         driver.current_location = matched_passenger.dropoff_location
         #         driver.total_income += matched_passenger.WTP
-    return new_matches
+    return new_matches, len(new_matches)
 
 # Main function to initialize and run the simulation
-def main():
+
+def simulations(NUM_AGENTS):
     round_num = 1
     city_center = (0, 0)
 
     # Generate drivers only in round 1
-    drivers = generate_drivers(NUM_AGENTS)
+    drivers1 = generate_drivers(NUM_AGENTS)
+    drivers2 = copy.deepcopy(drivers1)
+    drivers3 = copy.deepcopy(drivers1)
+    drivers4 = copy.deepcopy(drivers1)
+
 
     # Generate passengers for round 1
     passengers = generate_passengers(NUM_AGENTS)
+    passengers2 = copy.deepcopy(passengers)
 
-    matches = random_matches(drivers, passengers)
-    print(matches)
+    matches1 = driver_proposing_matching(drivers1, passengers, city_center, 0)
+    matches2 = random_matches(drivers2, passengers)
+    matches3 = closest_matches(drivers3, passengers)
+    matches4 = driver_proposing_matching_new(drivers4, passengers2, city_center, 5)
+    
 
-    driver_dict = {driver.name: driver for driver in drivers}
+    driver_dict = {driver.name: driver for driver in drivers1}
     passenger_dict = {passenger.name: passenger for passenger in passengers}
+    passenger_dict_2 = {passenger.name: passenger for passenger in passengers2}
 
-    for match in matches:
-        for driver in drivers:
+
+    for match in matches1:
+        for driver in drivers1:
             if driver.name == match[0]:
                 driver.matched_passenger_name = match[1]
             if driver.matched_passenger_name is not None:
@@ -327,23 +425,122 @@ def main():
                 driver.current_location = passenger.dropoff_location
                 driver.total_income += passenger.WTP
 
-    for round_num in range(2, 3):
+    for match in matches2:
+        for driver in drivers2:
+            if driver.name == match[0]:
+                driver.matched_passenger_name = match[1]
+            if driver.matched_passenger_name is not None:
+                passenger = passenger_dict[driver.matched_passenger_name]
+                driver.current_location = passenger.dropoff_location
+                driver.total_income += passenger.WTP
+    
+    for match in matches3:
+        for driver in drivers3:
+            if driver.name == match[0]:
+                driver.matched_passenger_name = match[1]
+            if driver.matched_passenger_name is not None:
+                passenger = passenger_dict[driver.matched_passenger_name]
+                driver.current_location = passenger.dropoff_location
+                driver.total_income += passenger.WTP
+
+    for match in matches4:
+        for driver in drivers4:
+            if driver.name == match[0]:
+                driver.matched_passenger_name = match[1]
+            if driver.matched_passenger_name is not None:
+                passenger = passenger_dict_2[driver.matched_passenger_name]
+                driver.current_location = passenger.dropoff_location
+                driver.total_income += passenger.WTP  
+
+    total_len_1 = len(matches1)
+    total_len_2 = len(matches2)  
+    total_len_3 = len(matches3)  
+    total_len_4 = len(matches4)            
+
+    for round_num in range(2, 50):
         # Generate new passengers for each round
         # passengers = generate_passengers(random.randint(15,15))
         
         # Simulate the round
-        matches = simulate_round(drivers, passengers, round_num, city_center, driver_proposing_matching, 0)
-        print(matches)
+        new_passengers = generate_passengers(NUM_AGENTS)
+        new_passengers2 = copy.deepcopy(new_passengers)
+        matches1, length1 = simulate_round(drivers1, new_passengers, round_num, city_center, driver_proposing_matching, 0)
+        matches2, length2 = simulate_round(drivers2, new_passengers, round_num, city_center, random_matches, 0)
+        matches3, length3 = simulate_round(drivers3, new_passengers, round_num, city_center, closest_matches, 0)
+        matches4, length4 = simulate_round(drivers4, new_passengers2, round_num, city_center, driver_proposing_matching_new, 5)
+
+        total_len_1 += length1
+        total_len_2 += length2
+        total_len_3 += length3
+        total_len_4 += length4
 
     # Print total_income values for each driver at the end of the simulation
-    print("\nTotal Income of Each Driver:")
-    for driver in drivers:
-        print(f"{driver.name}: {driver.total_income}")
+    # print("\nIncome Stats:")
+    drivers_list = [drivers1, drivers2, drivers3, drivers4]
+    length_list = [total_len_1, total_len_2, total_len_3, total_len_4]
+    results = {}
+    for i in range(4):
+        # for driver in drivers_list[i]:
+            # print(f"{driver.name}: {driver.total_income}")
+        total_incomes = [driver.total_income for driver in drivers_list[i]]
+        revenue = sum(total_incomes)
+        revenue_per_ride = revenue/length_list[i]
+        mean_income = statistics.mean(total_incomes)
+        sd_income = statistics.stdev(total_incomes)
+        if i == 0:
+            results["da"] = [revenue, revenue_per_ride, mean_income, sd_income] 
+        elif i == 1:
+            results["random"] = [revenue, revenue_per_ride, mean_income, sd_income] 
+        elif i == 2:
+            results["close"] = [revenue, revenue_per_ride, mean_income, sd_income] 
+        else:
+            results["boston"] = [revenue, revenue_per_ride, mean_income, sd_income] 
+        # print("\nRevenue of all drivers:" f"{i+1} "f"{revenue}")
+        # print("\nMean income of all drivers:" f"{i+1} "f"{mean_income}")
+        # print("\nSD income of all drivers:" f"{i+1} "f"{sd_income}")
 
-    total_incomes = [driver.total_income for driver in drivers]
-    print("\nTotal Income of all drivers:" f"{sum(total_incomes)}")
+    return results
 
-    print("\nSimulation completed!")
+    # print("\nSimulation completed!")
+
+
+def main():
+    incomes_da = []
+    # incomes_ran = []
+    # incomes_close = []
+    incomes_hypothetically_fair = []
+
+    for i in range(5,30):
+        results = simulations(i)
+        incomes_da.append(results["da"][3])
+        # incomes_ran.append(results["random"][3])
+        # incomes_close.append(results["close"][3])
+        incomes_hypothetically_fair.append(results["boston"][3])
+        
+
+    # Sample data for multiple lines
+    x_values = list(range(5, 30))
+    y_values1 = incomes_da
+    y_values2 = incomes_hypothetically_fair
+    # y_values3 = incomes_close
+    # y_values4 = incomes_boston
+
+    # Plotting multiple lines
+    plt.plot(x_values, y_values1, label='DA where drivers care more about proximity to passenger')
+    plt.plot(x_values, y_values2, label='DA where drivers care more about dropoff location distance to center')
+    # plt.plot(x_values, y_values3, label='Closeness')
+    # plt.plot(x_values, y_values4, label='Boston')
+
+    # Adding labels and title
+    plt.title('SD for different weights')
+
+    # Adding a legend
+    plt.legend()
+
+    # Display the plot
+    plt.show()
+
+    
 
 # Run the main function if the script is executed
 if __name__ == "__main__":
